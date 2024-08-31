@@ -1,78 +1,45 @@
 #' @import stats
-#' @importFrom imputeTS na_interpolation
-#' @importFrom imputeTS na_kalman
-#' @importFrom imputeTS na_ma
+#' @importFrom imputeTS na_interpolation na_kalman na_ma na_seadec
 #' @export
 
-baggedImpute <- function(data, bootrep = 1000, blocklen = 2, BBM = c("MBB", "NBB", "CBB"), misstr = c("ams", "ivs"), interpolation = c("Stineman", "Kalman", "SMA", "LWMA", "EWMA", "Linear"), WMAk = 2){
-  if (BBM == "CBB"){
-    BootFunc <- c(GenCBB)  
-  } else if (BBM == "MBB"){
-    BootFunc <- c(GenMBB)  
-  } else if (BBM == "NBB"){
-    BootFunc <- c(GenNBB)  
-  }
-  listNA <- which(is.na(data))
-  imputedSeries <- data
-  if(misstr == 'ams'){    #combine with ams
+baggedImpute <- function(data, bootrep = 1000, blocklen = 2, BBM = c("MBB", "NBB", "CBB"), misstr = c("ams", "ivs"), interpolation) {
+    bbm <- data.frame(
+        "bbm" = c("MBB", "NBB", "CBB"),
+        "formulas" = c("c(GenCBB)", "c(GenMBB)", "c(GenNBB)")
+    )
+    methods <- data.frame(
+      "methods" = c(
+        "auto.arima", "StructTS", "linear_i",
+        "spline_i", "stine_i", "simple_ma", "linear_ma",
+        "exponential_ma", "seadec_kalman", "seadec_ma",
+        "seadec_random"
+      ),
+      "formulas" = c(
+        "na_kalman(boot.result, model = 'auto.arima', smooth = TRUE, nit = -1)",
+        "na_kalman(boot.result, model = 'StructTS', smooth = TRUE, nit = -1)",
+        "na_interpolation(boot.result, option = 'linear')",
+        "na_interpolation(boot.result, option = 'spline')",
+        "na_interpolation(boot.result, option = 'stine')",
+        "na_ma(boot.result, k=3, weighting = 'simple')",
+        "na_ma(boot.result, k=3, weighting = 'linear')",
+        "na_ma(boot.result, k=3, weighting = 'exponential')",
+        "na_seadec(boot.result, algorithm = 'kalman')",
+        "na_seadec(boot.result, algorithm = 'ma')",
+        "na_seadec(boot.result, algorithm = 'random')"
+      )
+    )
+
+    if (BBM %in% bbm$bbm) {
+        BootFunc <- eval(parse(text = bbm$formulas[bbm$bbm == BBM]))
+    } else stop("Error: BBM not available!")
     
-    boot.result <- BootFunc[[1]](Xt = data, l = blocklen, r = bootrep, irreg = misstr) 
-    if (interpolation == "Stineman"){
-      z <- na_interpolation(boot.result, option = "stine")
-      RegularSeries <- apply(z , 1, mean , na.rm = TRUE)
-    } else if (interpolation == "Kalman"){
-      z <- na_kalman(x = boot.result, model = "auto.arima", smooth = TRUE)
-      RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-    } else if (interpolation == "SMA"){
-      if(WMAk > 0){
-        z <- na_ma(x = boot.result, k = WMAk, weighting = "simple")
-        RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-        }
-    } else if (interpolation == "LWMA"){
-      if(WMAk > 0){
-        z <- na_ma(x = boot.result, k = WMAk, weighting = "linear")
-        RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-        }
-    } else if (interpolation == "EWMA"){
-      if(WMAk > 0){
-        z <- na_ma(x = boot.result, k = WMAk, weighting = "exponential")
-        RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-        }
-    } else if (interpolation == "Linear"){
-      z <- na_interpolation(x = boot.result, option = "linear")
-      RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-    }
-  }else{    #combine with ivs
-    
-    boot.result = BootFunc[[1]](Xt = data, l = blocklen, r = bootrep, irreg = misstr)
-    if (interpolation == "Stineman"){
-      z <- na.interpolation(boot.result, option = "stine")
-      RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-    } else if (interpolation == "Kalman"){
-      z <- na.kalman(x=boot.result, model = "auto.arima", smooth = TRUE)
-      RegularSeries <- apply(z , 1, mean , na.rm = TRUE)
-    } else if (interpolation == "SMA"){
-      if(WMAk > 0){
-        z <- na_ma(x = boot.result, k = WMAk, weighting = "simple")
-        RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-        }
-    } else if (interpolation == "LWMA"){
-      if(WMAk > 0){
-        z <- na_ma(x = boot.result, k = WMAk, weighting = "linear")
-        RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-        }
-    } else if (interpolation == "EWMA"){
-      if(WMAk > 0){
-        z <- na_ma(x = boot.result, k = WMAk, weighting = "exponential")
-        RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-        }
-    } else if (interpolation == "Linear"){
-      z <- na_interpolation(x = boot.result, option = "linear")
-      RegularSeries <-apply(z , 1, mean , na.rm = TRUE)
-    }
-  }
-  imputedSeries[listNA] <- RegularSeries[listNA]
-  return(
-    imputedSeries
-  )
+    boot.result <- BootFunc[[1]](Xt = data, l = blocklen, r = bootrep, irreg = misstr)
+    if (interpolation %in% methods$methods) {
+      z <- eval(parse(text = methods$formulas[methods$methods == interpolation]))
+    } else stop("Error: method not available!")
+
+    listNA <- which(is.na(data))
+    imputedSeries <- data
+    imputedSeries[listNA] <- (apply(z , 1, mean , na.rm = TRUE))[listNA]
+    return(imputedSeries)
 }
